@@ -1,11 +1,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routers.documents import (
+    router as documents_router,
+)
+
 
 app = FastAPI(
     title="Student AI Assistant API",
-    description="Backend API for the Student AI Assistant application.",
-    version="0.1.0",
+    description=(
+        "Backend API for the "
+        "Student AI Assistant application."
+    ),
+    version="0.2.0",
 )
 
 
@@ -21,18 +28,26 @@ app.add_middleware(
 )
 
 
+app.include_router(
+    documents_router
+)
+
+
 @app.get("/")
 def read_root() -> dict[str, str]:
-    """Return basic information about the API."""
     return {
-        "message": "Student AI Assistant API is running"
+        "message": (
+            "Student AI Assistant API "
+            "is running"
+        )
     }
 
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
-    """Return the current health of the API."""
     return {
         "status": "ok",
-        "service": "student-ai-assistant-api",
+        "service": (
+            "student-ai-assistant-api"
+        ),
     }

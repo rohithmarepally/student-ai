@@ -50,3 +50,16 @@ cd backend
 python -m venv .venv
 pip install -r requirements.txt
 fastapi dev app/main.py
+## PDF Processing Pipeline
+
+Uploaded PDFs can be processed by the FastAPI backend.
+
+```text
+Authenticated user
+→ FastAPI
+→ Verify Supabase access token
+→ Download private PDF
+→ Extract text with pypdf
+→ Split text into overlapping chunks
+→ Store chunks in PostgreSQL
+→ Mark document as ready
