@@ -4,6 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers.documents import (
     router as documents_router,
 )
+from app.routers.rag import (
+    router as rag_router,
+)
 from app.routers.search import (
     router as search_router,
 )
@@ -15,7 +18,7 @@ app = FastAPI(
         "Backend API for the "
         "Student AI Assistant application."
     ),
-    version="0.3.0",
+    version="0.4.0",
 )
 
 
@@ -37,6 +40,10 @@ app.include_router(
 
 app.include_router(
     search_router
+)
+
+app.include_router(
+    rag_router
 )
 
 
