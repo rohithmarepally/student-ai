@@ -22,6 +22,13 @@ from app.services.answer_generation import (
     AnswerSource,
     get_answer_generation_service,
 )
+from app.services.chat_history import (
+    ChatPersistenceError,
+    ChatRetrievalError,
+    ConversationNotFoundError,
+    SourceSnapshotInput,
+    get_chat_history_service,
+)
 from app.services.semantic_search import (
     ChunkRetrievalError,
     QueryEmbeddingError,
@@ -40,11 +47,8 @@ router = APIRouter(
 
 
 MIN_QUESTION_LENGTH = 3
-
 MAX_QUESTION_LENGTH = 1000
-
 RAG_MATCH_COUNT = 5
-
 RAG_MATCH_THRESHOLD = 0.0
 
 NO_CONTEXT_ANSWER = (
@@ -58,6 +62,8 @@ class RagRequest(BaseModel):
     question: str
 
     document_id: UUID | None = None
+
+    conversation_id: UUID | None = None
 
     @field_validator("question")
     @classmethod
@@ -101,6 +107,9 @@ class RagSource(BaseModel):
 
 
 class RagResponse(BaseModel):
+    conversation_id: UUID
+    user_message_id: UUID
+    assistant_message_id: UUID
     question: str
     answer: str
     model: str | None
@@ -108,6 +117,25 @@ class RagResponse(BaseModel):
     retrieved_count: int
     cited_source_ids: list[str]
     sources: list[RagSource]
+
+
+def get_authenticated_user_id(
+    current_user: AuthenticatedUser,
+) -> UUID:
+    try:
+        return UUID(
+            current_user.id
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            detail=(
+                "The authenticated user ID "
+                "is invalid."
+            ),
+        ) from exc
 
 
 def build_answer_sources(
@@ -171,6 +199,60 @@ def build_response_sources(
     ]
 
 
+def validate_existing_conversation(
+    *,
+    user_id: UUID,
+    conversation_id: UUID | None,
+    document_id: UUID | None,
+) -> None:
+    if conversation_id is None:
+        return
+
+    try:
+        conversation_detail = (
+            get_chat_history_service()
+            .get_conversation(
+                user_id=user_id,
+                conversation_id=(
+                    conversation_id
+                ),
+            )
+        )
+    except ConversationNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found.",
+        ) from exc
+    except ChatRetrievalError as exc:
+        logger.exception(
+            "Conversation validation failed."
+        )
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            detail=(
+                "The conversation could not "
+                "be validated."
+            ),
+        ) from exc
+
+    if (
+        conversation_detail
+        .conversation
+        .document_id
+        != document_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The selected document does not "
+                "match this conversation."
+            ),
+        )
+
+
 @router.post(
     "",
     response_model=RagResponse,
@@ -182,12 +264,24 @@ def generate_rag_answer(
         Depends(get_current_user),
     ],
 ) -> RagResponse:
+    user_id = get_authenticated_user_id(
+        current_user
+    )
+
+    validate_existing_conversation(
+        user_id=user_id,
+        conversation_id=(
+            request.conversation_id
+        ),
+        document_id=request.document_id,
+    )
+
     try:
         matches = (
             get_semantic_search_service()
             .search(
                 question=request.question,
-                user_id=current_user.id,
+                user_id=str(user_id),
                 document_id=(
                     request.document_id
                 ),
@@ -205,10 +299,12 @@ def generate_rag_answer(
         )
 
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+            ),
             detail=(
-                "The question could not be embedded. "
-                "Please try again."
+                "The question could not be "
+                "embedded. Please try again."
             ),
         ) from exc
     except ChunkRetrievalError as exc:
@@ -217,7 +313,9 @@ def generate_rag_answer(
         )
 
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
             detail=(
                 "Relevant document chunks "
                 "could not be retrieved."
@@ -225,69 +323,135 @@ def generate_rag_answer(
         ) from exc
 
     if not matches:
-        return RagResponse(
-            question=request.question,
-            answer=NO_CONTEXT_ANSWER,
-            model=None,
-            insufficient_context=True,
-            retrieved_count=0,
-            cited_source_ids=[],
-            sources=[],
-        )
-
-    answer_sources = (
-        build_answer_sources(
+        answer = NO_CONTEXT_ANSWER
+        model = None
+        insufficient_context = True
+        cited_source_ids: list[str] = []
+        response_sources: list[RagSource] = []
+    else:
+        answer_sources = build_answer_sources(
             matches
         )
-    )
 
-    try:
-        generated_answer = (
-            get_answer_generation_service()
-            .generate_answer(
-                question=request.question,
-                sources=answer_sources,
+        try:
+            generated_answer = (
+                get_answer_generation_service()
+                .generate_answer(
+                    question=request.question,
+                    sources=answer_sources,
+                )
+            )
+        except AnswerGenerationError as exc:
+            logger.exception(
+                "Grounded answer generation failed."
+            )
+
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_502_BAD_GATEWAY
+                ),
+                detail=(
+                    "A grounded answer could "
+                    "not be generated. "
+                    "Please try again."
+                ),
+            ) from exc
+
+        answer = generated_answer.answer
+        model = generated_answer.model
+
+        insufficient_context = (
+            generated_answer
+            .insufficient_context
+        )
+
+        cited_source_ids = (
+            generated_answer
+            .cited_source_ids
+        )
+
+        response_sources = (
+            build_response_sources(
+                matches=matches,
+                answer_sources=(
+                    answer_sources
+                ),
+                cited_source_ids=set(
+                    cited_source_ids
+                ),
             )
         )
-    except AnswerGenerationError as exc:
+
+    source_snapshots = [
+        SourceSnapshotInput(
+            source_id=source.source_id,
+            chunk_id=source.chunk_id,
+            document_id=(
+                source.document_id
+            ),
+            similarity=source.similarity,
+            cited=source.cited,
+        )
+        for source in response_sources
+    ]
+
+    try:
+        saved_exchange = (
+            get_chat_history_service()
+            .save_exchange(
+                user_id=user_id,
+                conversation_id=(
+                    request.conversation_id
+                ),
+                document_id=(
+                    request.document_id
+                ),
+                question=request.question,
+                answer=answer,
+                model=model,
+                insufficient_context=(
+                    insufficient_context
+                ),
+                sources=source_snapshots,
+            )
+        )
+    except ChatPersistenceError as exc:
         logger.exception(
-            "Grounded answer generation failed."
+            "RAG exchange persistence failed."
         )
 
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
             detail=(
-                "A grounded answer could not "
-                "be generated. Please try again."
+                "The answer could not be saved. "
+                "Please try again."
             ),
         ) from exc
 
-    cited_source_id_set = set(
-        generated_answer.cited_source_ids
-    )
-
-    response_sources = (
-        build_response_sources(
-            matches=matches,
-            answer_sources=answer_sources,
-            cited_source_ids=(
-                cited_source_id_set
-            ),
-        )
-    )
-
     return RagResponse(
+        conversation_id=(
+            saved_exchange
+            .saved_conversation_id
+        ),
+        user_message_id=(
+            saved_exchange
+            .saved_user_message_id
+        ),
+        assistant_message_id=(
+            saved_exchange
+            .saved_assistant_message_id
+        ),
         question=request.question,
-        answer=generated_answer.answer,
-        model=generated_answer.model,
+        answer=answer,
+        model=model,
         insufficient_context=(
-            generated_answer
-            .insufficient_context
+            insufficient_context
         ),
         retrieved_count=len(matches),
         cited_source_ids=(
-            generated_answer
-            .cited_source_ids
+            cited_source_ids
         ),
         sources=response_sources,
     )
