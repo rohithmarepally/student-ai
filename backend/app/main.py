@@ -1,6 +1,11 @@
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import (
+    CORSMiddleware,
+)
 
+from app.routers.conversations import (
+    router as conversations_router,
+)
 from app.routers.documents import (
     router as documents_router,
 )
@@ -18,7 +23,7 @@ app = FastAPI(
         "Backend API for the "
         "Student AI Assistant application."
     ),
-    version="0.4.0",
+    version="0.5.0",
 )
 
 
@@ -44,6 +49,10 @@ app.include_router(
 
 app.include_router(
     rag_router
+)
+
+app.include_router(
+    conversations_router
 )
 
 
