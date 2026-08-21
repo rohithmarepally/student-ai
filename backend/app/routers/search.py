@@ -14,16 +14,15 @@ from pydantic import (
     field_validator,
 )
 
-from app.core.supabase import (
-    get_admin_client,
-)
 from app.dependencies.auth import (
     AuthenticatedUser,
     get_current_user,
 )
-from app.services.embeddings import (
-    EmbeddingServiceError,
-    get_embedding_service,
+from app.services.semantic_search import (
+    ChunkRetrievalError,
+    QueryEmbeddingError,
+    RetrievedChunk,
+    get_semantic_search_service,
 )
 
 
@@ -87,20 +86,10 @@ class SemanticSearchRequest(BaseModel):
         return cleaned_question
 
 
-class SemanticSearchMatch(BaseModel):
-    chunk_id: int
-    document_id: UUID
-    original_name: str
-    chunk_index: int
-    page_number: int
-    content: str
-    similarity: float
-
-
 class SemanticSearchResponse(BaseModel):
     question: str
     match_count: int
-    matches: list[SemanticSearchMatch]
+    matches: list[RetrievedChunk]
 
 
 @router.post(
@@ -115,13 +104,23 @@ def semantic_search(
     ],
 ) -> SemanticSearchResponse:
     try:
-        query_embedding = (
-            get_embedding_service()
-            .embed_query(
-                request.question
+        matches = (
+            get_semantic_search_service()
+            .search(
+                question=request.question,
+                user_id=current_user.id,
+                document_id=(
+                    request.document_id
+                ),
+                match_count=(
+                    request.match_count
+                ),
+                match_threshold=(
+                    request.match_threshold
+                ),
             )
         )
-    except EmbeddingServiceError as exc:
+    except QueryEmbeddingError as exc:
         logger.exception(
             "Question embedding generation failed."
         )
@@ -133,45 +132,7 @@ def semantic_search(
                 "Please try again."
             ),
         ) from exc
-
-    try:
-        admin = get_admin_client()
-
-        rpc_response = (
-            admin
-            .rpc(
-                "match_document_chunks",
-                {
-                    "p_query_embedding": (
-                        query_embedding.vector
-                    ),
-                    "p_user_id": current_user.id,
-                    "p_match_count": (
-                        request.match_count
-                    ),
-                    "p_match_threshold": (
-                        request.match_threshold
-                    ),
-                    "p_document_id": (
-                        str(request.document_id)
-                        if request.document_id
-                        else None
-                    ),
-                },
-            )
-            .execute()
-        )
-
-        matches = [
-            SemanticSearchMatch.model_validate(
-                row
-            )
-            for row in (
-                rpc_response.data
-                or []
-            )
-        ]
-    except Exception as exc:
+    except ChunkRetrievalError as exc:
         logger.exception(
             "Semantic chunk search failed."
         )
