@@ -18,6 +18,11 @@ from app.dependencies.auth import (
     AuthenticatedUser,
     get_current_user,
 )
+from app.services.embeddings import (
+    EmbeddingServiceError,
+    GeneratedEmbedding,
+    get_embedding_service,
+)
 from app.services.pdf_processing import (
     ProcessedPdf,
     process_pdf_bytes,
@@ -35,7 +40,7 @@ router = APIRouter(
 
 BUCKET_NAME = "study-documents"
 
-INSERT_BATCH_SIZE = 200
+INSERT_BATCH_SIZE = 50
 
 
 class ProcessDocumentResponse(BaseModel):
@@ -48,6 +53,7 @@ class ProcessDocumentResponse(BaseModel):
 
 def mark_document_failed(
     document_id: str,
+    user_id: str,
     error_message: str,
 ) -> None:
     try:
@@ -68,6 +74,10 @@ def mark_document_failed(
                 "id",
                 document_id,
             )
+            .eq(
+                "user_id",
+                user_id,
+            )
             .execute()
         )
     except Exception:
@@ -79,10 +89,19 @@ def mark_document_failed(
 
 def insert_chunks(
     processed_pdf: ProcessedPdf,
+    embeddings: list[GeneratedEmbedding],
     document_id: str,
     user_id: str,
 ) -> None:
-    admin = get_admin_client()
+    if len(processed_pdf.chunks) != len(embeddings):
+        raise EmbeddingServiceError(
+            "The number of embeddings does not "
+            "match the number of document chunks."
+        )
+
+    embedded_at = datetime.now(
+        timezone.utc
+    ).isoformat()
 
     rows = [
         {
@@ -92,9 +111,18 @@ def insert_chunks(
             "page_number": chunk.page_number,
             "content": chunk.content,
             "char_count": chunk.char_count,
+            "embedding": embedding.vector,
+            "embedding_model": embedding.model,
+            "embedded_at": embedded_at,
         }
-        for chunk in processed_pdf.chunks
+        for chunk, embedding in zip(
+            processed_pdf.chunks,
+            embeddings,
+            strict=True,
+        )
     ]
+
+    admin = get_admin_client()
 
     for start in range(
         0,
@@ -200,17 +228,6 @@ def process_document(
             .execute()
         )
 
-        (
-            admin
-            .table("document_chunks")
-            .delete()
-            .eq(
-                "document_id",
-                document_id_string,
-            )
-            .execute()
-        )
-
         pdf_bytes = (
             admin
             .storage
@@ -228,8 +245,37 @@ def process_document(
             )
         )
 
+        embedding_service = (
+            get_embedding_service()
+        )
+
+        embeddings = (
+            embedding_service.embed_documents(
+                [
+                    chunk.content
+                    for chunk in processed_pdf.chunks
+                ]
+            )
+        )
+
+        (
+            admin
+            .table("document_chunks")
+            .delete()
+            .eq(
+                "document_id",
+                document_id_string,
+            )
+            .eq(
+                "user_id",
+                current_user.id,
+            )
+            .execute()
+        )
+
         insert_chunks(
             processed_pdf=processed_pdf,
+            embeddings=embeddings,
             document_id=document_id_string,
             user_id=current_user.id,
         )
@@ -279,13 +325,37 @@ def process_document(
 
     except ValueError as exc:
         mark_document_failed(
-            document_id_string,
-            str(exc),
+            document_id=document_id_string,
+            user_id=current_user.id,
+            error_message=str(exc),
         )
 
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
+        ) from exc
+
+    except EmbeddingServiceError as exc:
+        logger.exception(
+            "Embedding generation failed "
+            "for document %s.",
+            document_id_string,
+        )
+
+        error_message = (
+            "Embedding generation failed. "
+            "Please try again."
+        )
+
+        mark_document_failed(
+            document_id=document_id_string,
+            user_id=current_user.id,
+            error_message=error_message,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=error_message,
         ) from exc
 
     except Exception as exc:
@@ -296,8 +366,11 @@ def process_document(
         )
 
         mark_document_failed(
-            document_id_string,
-            "Unexpected document processing error.",
+            document_id=document_id_string,
+            user_id=current_user.id,
+            error_message=(
+                "Unexpected document processing error."
+            ),
         )
 
         raise HTTPException(

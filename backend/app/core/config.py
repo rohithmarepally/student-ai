@@ -29,6 +29,7 @@ class Settings:
     supabase_url: str
     supabase_publishable_key: str
     supabase_secret_key: str
+    gemini_api_key: str
 
 
 @lru_cache
@@ -42,5 +43,8 @@ def get_settings() -> Settings:
         ),
         supabase_secret_key=require_environment_variable(
             "SUPABASE_SECRET_KEY"
+        ),
+        gemini_api_key=require_environment_variable(
+            "GEMINI_API_KEY"
         ),
     )
