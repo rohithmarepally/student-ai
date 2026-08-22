@@ -9,6 +9,9 @@ from app.routers.conversations import (
 from app.routers.documents import (
     router as documents_router,
 )
+from app.routers.quizzes import (
+    router as quizzes_router,
+)
 from app.routers.rag import (
     router as rag_router,
 )
@@ -23,9 +26,8 @@ app = FastAPI(
         "Backend API for the "
         "Student AI Assistant application."
     ),
-    version="0.6.0",
+    version="0.7.0",
 )
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,7 +39,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 app.include_router(
     documents_router
@@ -53,6 +54,10 @@ app.include_router(
 
 app.include_router(
     conversations_router
+)
+
+app.include_router(
+    quizzes_router
 )
 
 
