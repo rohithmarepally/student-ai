@@ -23,7 +23,7 @@ app = FastAPI(
         "Backend API for the "
         "Student AI Assistant application."
     ),
-    version="0.5.0",
+    version="0.6.0",
 )
 
 
