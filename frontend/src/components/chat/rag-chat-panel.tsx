@@ -347,8 +347,35 @@ export function RagChatPanel({
     );
 
   useEffect(() => {
-    void loadConversationList();
-  }, [loadConversationList]);
+    let isActive = true;
+
+    authenticatedApiFetch<
+      ConversationListResponse
+    >("/conversations")
+      .then((response) => {
+        if (isActive) {
+          setConversations(
+            response.conversations,
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        if (isActive) {
+          setErrorMessage(
+            getErrorMessage(error),
+          );
+        }
+      })
+      .finally(() => {
+        if (isActive) {
+          setIsLoadingHistory(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current
