@@ -1,6 +1,12 @@
-import { RagChatPanel } from "@/components/chat/rag-chat-panel";
-import { PageHeader } from "@/components/ui/page-header";
-import { createClient } from "@/lib/supabase/server";
+import {
+  RagChatPanel,
+} from "@/components/chat/rag-chat-panel";
+import {
+  PageHeader,
+} from "@/components/ui/page-header";
+import {
+  createClient,
+} from "@/lib/supabase/server";
 import type {
   ReadyDocumentOption,
 } from "@/types/rag";
@@ -15,9 +21,12 @@ export default async function ChatPage() {
     .from("documents")
     .select("id, original_name")
     .eq("status", "ready")
-    .order("created_at", {
-      ascending: false,
-    });
+    .order(
+      "created_at",
+      {
+        ascending: false,
+      },
+    );
 
   const documents: ReadyDocumentOption[] = (
     data ?? []
@@ -29,9 +38,9 @@ export default async function ChatPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow="Retrieval-augmented generation"
+        eyebrow="Conversational RAG"
         title="AI document chat"
-        description="Ask questions and receive answers grounded in your processed PDFs, with links to the supporting chunks."
+        description="Ask questions and contextual follow-ups. Answers remain grounded in your processed PDFs and linked to supporting chunks."
       />
 
       <RagChatPanel

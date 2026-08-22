@@ -20,6 +20,9 @@ export type RagResponse = {
   user_message_id: string;
   assistant_message_id: string;
   question: string;
+  retrieval_query: string;
+  used_conversation_history: boolean;
+  query_rewrite_model: string | null;
   answer: string;
   model: string | null;
   insufficient_context: boolean;

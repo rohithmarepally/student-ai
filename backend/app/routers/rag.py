@@ -25,9 +25,16 @@ from app.services.answer_generation import (
 from app.services.chat_history import (
     ChatPersistenceError,
     ChatRetrievalError,
+    ConversationDetail,
     ConversationNotFoundError,
     SourceSnapshotInput,
     get_chat_history_service,
+)
+from app.services.query_rewriting import (
+    ConversationContextMessage,
+    QueryRewriteError,
+    QueryRewriteResult,
+    get_query_rewrite_service,
 )
 from app.services.semantic_search import (
     ChunkRetrievalError,
@@ -111,6 +118,9 @@ class RagResponse(BaseModel):
     user_message_id: UUID
     assistant_message_id: UUID
     question: str
+    retrieval_query: str
+    used_conversation_history: bool
+    query_rewrite_model: str | None
     answer: str
     model: str | None
     insufficient_context: bool
@@ -199,14 +209,14 @@ def build_response_sources(
     ]
 
 
-def validate_existing_conversation(
+def load_existing_conversation(
     *,
     user_id: UUID,
     conversation_id: UUID | None,
     document_id: UUID | None,
-) -> None:
+) -> ConversationDetail | None:
     if conversation_id is None:
-        return
+        return None
 
     try:
         conversation_detail = (
@@ -252,6 +262,68 @@ def validate_existing_conversation(
             ),
         )
 
+    return conversation_detail
+
+
+def build_conversation_context(
+    conversation_detail: (
+        ConversationDetail | None
+    ),
+) -> list[
+    ConversationContextMessage
+]:
+    if conversation_detail is None:
+        return []
+
+    return [
+        ConversationContextMessage(
+            role=message.role,
+            content=message.content,
+        )
+        for message in (
+            conversation_detail.messages
+        )
+    ]
+
+
+def rewrite_retrieval_query(
+    *,
+    question: str,
+    conversation_detail: (
+        ConversationDetail | None
+    ),
+) -> QueryRewriteResult:
+    history = (
+        build_conversation_context(
+            conversation_detail
+        )
+    )
+
+    try:
+        return (
+            get_query_rewrite_service()
+            .rewrite(
+                question=question,
+                history=history,
+            )
+        )
+    except QueryRewriteError as exc:
+        logger.exception(
+            "Conversational query "
+            "rewriting failed."
+        )
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+            ),
+            detail=(
+                "The follow-up question could "
+                "not be understood. "
+                "Please try again."
+            ),
+        ) from exc
+
 
 @router.post(
     "",
@@ -268,19 +340,35 @@ def generate_rag_answer(
         current_user
     )
 
-    validate_existing_conversation(
-        user_id=user_id,
-        conversation_id=(
-            request.conversation_id
-        ),
-        document_id=request.document_id,
+    conversation_detail = (
+        load_existing_conversation(
+            user_id=user_id,
+            conversation_id=(
+                request.conversation_id
+            ),
+            document_id=(
+                request.document_id
+            ),
+        )
+    )
+
+    rewrite_result = (
+        rewrite_retrieval_query(
+            question=request.question,
+            conversation_detail=(
+                conversation_detail
+            ),
+        )
     )
 
     try:
         matches = (
             get_semantic_search_service()
             .search(
-                question=request.question,
+                question=(
+                    rewrite_result
+                    .retrieval_query
+                ),
                 user_id=str(user_id),
                 document_id=(
                     request.document_id
@@ -337,13 +425,17 @@ def generate_rag_answer(
             generated_answer = (
                 get_answer_generation_service()
                 .generate_answer(
-                    question=request.question,
+                    question=(
+                        rewrite_result
+                        .retrieval_query
+                    ),
                     sources=answer_sources,
                 )
             )
         except AnswerGenerationError as exc:
             logger.exception(
-                "Grounded answer generation failed."
+                "Grounded answer generation "
+                "failed."
             )
 
             raise HTTPException(
@@ -444,6 +536,15 @@ def generate_rag_answer(
             .saved_assistant_message_id
         ),
         question=request.question,
+        retrieval_query=(
+            rewrite_result.retrieval_query
+        ),
+        used_conversation_history=(
+            rewrite_result.used_history
+        ),
+        query_rewrite_model=(
+            rewrite_result.model
+        ),
         answer=answer,
         model=model,
         insufficient_context=(
