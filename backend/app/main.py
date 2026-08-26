@@ -1,8 +1,19 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import (
     CORSMiddleware,
 )
 
+from app.core.config import (
+    get_settings,
+)
+from app.middleware.rate_limit import (
+    RateLimitMiddleware,
+)
+from app.middleware.request_context import (
+    RequestContextMiddleware,
+)
 from app.routers.conversations import (
     router as conversations_router,
 )
@@ -23,24 +34,57 @@ from app.routers.search import (
 )
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format=(
+        "%(asctime)s %(levelname)s "
+        "%(name)s %(message)s"
+    ),
+)
+
+settings = get_settings()
+
 app = FastAPI(
     title="Student AI Assistant API",
     description=(
         "Backend API for the "
         "Student AI Assistant application."
     ),
-    version="0.8.0",
+    version="0.9.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=list(
+        settings.allowed_origins
+    ),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=[
+        "GET",
+        "POST",
+        "DELETE",
+        "OPTIONS",
+    ],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+    ],
+    expose_headers=[
+        "X-Request-ID",
+        "X-Response-Time-Ms",
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Reset",
+        "Retry-After",
+    ],
+)
+
+app.add_middleware(
+    RateLimitMiddleware
+)
+
+app.add_middleware(
+    RequestContextMiddleware
 )
 
 app.include_router(
