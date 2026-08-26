@@ -9,6 +9,9 @@ from app.routers.conversations import (
 from app.routers.documents import (
     router as documents_router,
 )
+from app.routers.flashcards import (
+    router as flashcards_router,
+)
 from app.routers.quizzes import (
     router as quizzes_router,
 )
@@ -26,7 +29,7 @@ app = FastAPI(
         "Backend API for the "
         "Student AI Assistant application."
     ),
-    version="0.7.0",
+    version="0.8.0",
 )
 
 app.add_middleware(
@@ -58,6 +61,10 @@ app.include_router(
 
 app.include_router(
     quizzes_router
+)
+
+app.include_router(
+    flashcards_router
 )
 
 
