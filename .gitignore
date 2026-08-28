@@ -16,3 +16,7 @@ Thumbs.db
 
 coverage/
 htmlcov/
+# Python coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
