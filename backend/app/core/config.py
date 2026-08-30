@@ -105,6 +105,7 @@ class Settings:
     gemini_api_key: str
     allowed_origins: tuple[str, ...]
     rate_limit_hmac_key: str
+    rate_limit_enabled: bool
 
 
 @lru_cache
@@ -143,5 +144,9 @@ def get_settings() -> Settings:
                 "RATE_LIMIT_HMAC_KEY",
                 minimum_length=32,
             )
+        ),
+        rate_limit_enabled=(
+            os.getenv("RATE_LIMIT_ENABLED", "false").lower()
+            == "true"
         ),
     )

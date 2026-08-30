@@ -79,9 +79,10 @@ app.add_middleware(
     ],
 )
 
-app.add_middleware(
-    RateLimitMiddleware
-)
+if settings.rate_limit_enabled:
+    app.add_middleware(
+        RateLimitMiddleware
+    )
 
 app.add_middleware(
     RequestContextMiddleware
