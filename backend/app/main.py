@@ -31,11 +31,22 @@ app.add_middleware(RequestContextMiddleware)
 
 if settings.rate_limit_enabled:
     app.add_middleware(RateLimitMiddleware)
+origins = settings.allowed_origins
+if isinstance(origins, str):
+    origins_list = [o.strip() for o in origins.split(",") if o.strip()]
+else:
+    origins_list = list(origins)
 
+
+origins_list.extend([
+    "https://student-ai-rosy.vercel.app",
+    "http://localhost:3000",
+    ])
+origins_list = list(set(origins_list))
 # 2. CORS Middleware added LAST (runs OUTSIDE as the first layer for incoming requests)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list(settings.allowed_origins),
+    allow_origins=origins_list,
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods (PUT, PATCH, POST, OPTIONS, etc.)
     allow_headers=["*"],  # Allow all headers (including Supabase/Next.js client headers)

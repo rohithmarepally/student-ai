@@ -199,6 +199,8 @@ class RateLimitMiddleware(
         request: Request,
         call_next,
     ) -> Response:
+        if request.method == "OPTIONS":
+            return await call_next(request)
         rule = find_rule(request)
 
         if rule is None:

@@ -23,6 +23,8 @@ class RequestContextMiddleware(
         request: Request,
         call_next,
     ) -> Response:
+        if request.method == "OPTIONS":
+            return await call_next(request)
         request_id = str(uuid4())
 
         request.state.request_id = (
