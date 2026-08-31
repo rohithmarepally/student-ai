@@ -57,7 +57,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(
         settings.allowed_origins
-    ),
+    ),"https://student-ai-rosy.vercel.app",
     allow_credentials=True,
     allow_methods=[
         "GET",
